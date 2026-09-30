@@ -1,0 +1,26 @@
+{
+  "name": "screen-display",
+  "version": "1.0.0",
+  "description": "Full-screen video overlay with drawing and MIDI control",
+  "main": "main.js",
+  "author": "Screen Display",
+  "scripts": {
+    "start": "electron .",
+    "build:win": "electron-builder --win portable --x64"
+  },
+  "build": {
+    "appId": "com.screendisplay.app",
+    "productName": "Screen Display",
+    "files": ["main.js", "index.html", "app.js", "style.css"],
+    "directories": { "output": "dist" },
+    "win": {
+      "target": "portable",
+      "signAndEditExecutable": false
+    },
+    "portable": { "artifactName": "ScreenDisplay.exe" }
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  }
+}
