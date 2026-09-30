@@ -1,9 +1,12 @@
-name: Build Windows portable exe
+name: Build Windows installer
 
 on:
   push:
-    branches: [main]
+    tags: ['v*']
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -15,8 +18,16 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm run build:win
-      - uses: actions/upload-artifact@v4
+      # Tag push: build and publish to a GitHub Release (what the app auto-updates from).
+      - if: startsWith(github.ref, 'refs/tags/v')
+        run: npm run release:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Manual run: build only, upload as a downloadable artifact.
+      - if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: npm run build:win
+      - if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
         with:
-          name: ScreenDisplay-portable
-          path: dist/ScreenDisplay.exe
+          name: ScreenDisplay-installer
+          path: dist/*.exe

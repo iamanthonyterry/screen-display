@@ -6,21 +6,42 @@
   "author": "Screen Display",
   "scripts": {
     "start": "electron .",
-    "build:win": "electron-builder --win portable --x64"
+    "build:win": "electron-builder --win nsis --x64",
+    "release:win": "electron-builder --win nsis --x64 --publish always"
   },
   "build": {
     "appId": "com.screendisplay.app",
     "productName": "Screen Display",
-    "files": ["main.js", "index.html", "app.js", "style.css"],
-    "directories": { "output": "dist" },
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "app.js",
+      "style.css"
+    ],
+    "directories": {
+      "output": "dist"
+    },
     "win": {
-      "target": "portable",
+      "target": "nsis",
       "signAndEditExecutable": false
     },
-    "portable": { "artifactName": "ScreenDisplay.exe" }
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "ScreenDisplay-Setup-${version}.exe"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "iamanthonyterry",
+      "repo": "screen-display"
+    }
   },
   "devDependencies": {
     "electron": "^33.0.0",
     "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

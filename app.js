@@ -413,3 +413,30 @@ applyBackground();
 renderPens();
 renderMap();
 resize();
+
+// ---------- updates ----------
+(function () {
+  if (!window.updater) return;
+  let version = '';
+  let ready = false;
+  const status = $('updateStatus'), btn = $('updateBtn');
+  const label = s => {
+    switch (s.state) {
+      case 'checking': return 'Checking for updates…';
+      case 'downloading': return 'Downloading update' + (s.percent != null ? ' ' + s.percent + '%' : '…');
+      case 'ready': return 'Update ' + s.version + ' ready';
+      case 'current': return 'Up to date';
+      case 'dev': return 'Updates only work in the installed app';
+      case 'error': return 'Update check failed';
+    }
+    return '';
+  };
+  window.updater.version().then(v => { version = v; status.textContent = 'Version ' + v; });
+  window.updater.onStatus(s => {
+    ready = s.state === 'ready';
+    status.textContent = 'Version ' + version + ' — ' + label(s);
+    btn.textContent = ready ? 'Restart to update' : 'Check for updates';
+    if (ready) toast('Update ready — restart to install');
+  });
+  btn.onclick = () => ready ? window.updater.install() : window.updater.check();
+})();
