@@ -8,7 +8,10 @@ const PENS = [
   { name: 'Neon cyan',   color: '#00e5ff', width: 5,  alpha: 1,   cap: 'round', glow: 18 },
   { name: 'Green pen',   color: '#34c759', width: 4,  alpha: 1,   cap: 'round' },
   { name: 'Blue brush',  color: '#0a84ff', width: 16, alpha: 0.9, cap: 'round' },
+  { name: 'Black pen',   color: '#000000', width: 5,  alpha: 1,   cap: 'round' },
+  { name: 'Custom',      color: '#ff00ff', width: 5,  alpha: 1,   cap: 'round', custom: true },
 ];
+const CUSTOM = PENS.length - 1;
 
 const ACTIONS = [
   { id: 'clear',      label: 'Clear drawing',  note: 60, run: () => clearInk() },
@@ -18,7 +21,7 @@ const ACTIONS = [
   { id: 'nextPen',    label: 'Next pen',       note: 62, run: () => setPen(penIndex + 1) },
   { id: 'prevPen',    label: 'Previous pen',   note: 63, run: () => setPen(penIndex - 1) },
   { id: 'undo',       label: 'Undo stroke',    note: 70, run: () => undo() },
-  ...PENS.map((p, i) => ({ id: 'pen' + i, label: 'Pen ' + (i + 1) + ': ' + p.name, note: 64 + i, run: () => setPen(i) })),
+  ...PENS.map((p, i) => ({ id: 'pen' + i, label: 'Pen ' + (i + 1) + ': ' + p.name, note: i < 6 ? 64 + i : null, run: () => setPen(i) })),
 ];
 
 // ---------- state ----------
@@ -30,6 +33,7 @@ const store = {
 
 let penIndex = store.get('pen', 0);
 let sizeMul = store.get('size', 1);
+PENS[CUSTOM].color = store.get('customColor', PENS[CUSTOM].color);
 let notify = store.get('notify', true);
 let hidden = false;
 let strokes = [];
@@ -193,11 +197,25 @@ function renderPens() {
     box.append(b);
   });
   renderQuickPens();
+  $('customColor').value = PENS[CUSTOM].color;
 }
+
+function setCustomColor(c) {
+  PENS[CUSTOM].color = c;
+  store.set('customColor', c);
+  if (penIndex !== CUSTOM) setPen(CUSTOM); else renderPens();
+}
+$('customColor').oninput = e => setCustomColor(e.target.value);
+
+// created once so it isn't destroyed while the picker is open
+const quickPick = document.createElement('input');
+quickPick.type = 'color';
+quickPick.title = 'Custom color';
+quickPick.oninput = e => setCustomColor(e.target.value);
 
 function renderQuickPens() {
   const box = $('quickPens');
-  box.innerHTML = '';
+  box.replaceChildren();
   PENS.forEach((p, i) => {
     const b = document.createElement('button');
     b.className = i === penIndex ? 'active' : '';
@@ -210,6 +228,8 @@ function renderQuickPens() {
     b.onclick = () => { setPen(i); box.hidden = true; };
     box.append(b);
   });
+  quickPick.value = PENS[CUSTOM].color;
+  box.append(quickPick);
   $('penBtn').style.color = PENS[penIndex].color;
 }
 
