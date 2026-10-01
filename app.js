@@ -10,8 +10,10 @@ const PENS = [
   { name: 'Blue brush',  color: '#0a84ff', width: 16, alpha: 0.9, cap: 'round' },
   { name: 'Black pen',   color: '#000000', width: 5,  alpha: 1,   cap: 'round' },
   { name: 'Custom',      color: '#ff00ff', width: 5,  alpha: 1,   cap: 'round', custom: true },
+  { name: 'Eraser',      color: '#9a9a9a', width: 30, alpha: 1,   cap: 'round', eraser: true },
 ];
-const CUSTOM = PENS.length - 1;
+const CUSTOM = PENS.findIndex(p => p.custom);
+const ERASER = PENS.findIndex(p => p.eraser);
 
 const ACTIONS = [
   { id: 'clear',      label: 'Clear drawing',  note: 60, run: () => clearInk() },
@@ -57,13 +59,17 @@ function resize() {
 }
 addEventListener('resize', resize);
 
-function drawStroke(ctx, s) {
+function drawStroke(ctx, s, preview) {
   const p = s.pts;
   ctx.save();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.lineCap = s.cap; ctx.lineJoin = 'round';
   ctx.strokeStyle = s.color; ctx.fillStyle = s.color;
   ctx.globalAlpha = s.alpha; ctx.lineWidth = s.width;
+  if (s.erase) {
+    if (preview) { ctx.strokeStyle = ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.35; }
+    else ctx.globalCompositeOperation = 'destination-out';
+  }
   if (s.glow) { ctx.shadowColor = s.color; ctx.shadowBlur = s.glow; }
   if (p.length === 1) {
     ctx.beginPath(); ctx.arc(p[0].x, p[0].y, s.width / 2, 0, Math.PI * 2); ctx.fill();
@@ -90,7 +96,7 @@ function scheduleLive() {
   requestAnimationFrame(() => {
     rafPending = false;
     lctx.clearRect(0, 0, live.width, live.height);
-    for (const s of active.values()) drawStroke(lctx, s);
+    for (const s of active.values()) drawStroke(lctx, s, true);
   });
 }
 
@@ -106,7 +112,7 @@ committed.parentElement.addEventListener('pointerdown', e => {
   if (hidden) setHidden(false);
   const pen = PENS[penIndex];
   const s = {
-    color: pen.color, width: pen.width * sizeMul, alpha: pen.alpha, cap: pen.cap, glow: pen.glow || 0,
+    color: pen.color, width: pen.width * sizeMul, alpha: pen.alpha, cap: pen.cap, glow: pen.glow || 0, erase: !!pen.eraser,
     pts: [{ x: e.clientX, y: e.clientY }], t0: now, len: 0,
   };
   active.set(e.pointerId, s);
@@ -279,6 +285,7 @@ addEventListener('keydown', e => {
   else if (k === 'c') clearInk();
   else if (k === 'h') setHidden(!hidden);
   else if (k === 'z') undo();
+  else if (k === 'e') setPen(ERASER);
   else if (k === 'p') setPen(penIndex + 1);
   else if (k === 's') $('panel').hidden = !$('panel').hidden;
   else if (k >= '1' && k <= String(PENS.length)) setPen(+k - 1);
