@@ -84,6 +84,19 @@ function drawStroke(ctx, s, preview) {
   ctx.restore();
 }
 
+// erasing happens live: each new segment is cut out of the committed canvas immediately
+function eraseSegment(s, a, b) {
+  cctx.save();
+  cctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cctx.globalCompositeOperation = 'destination-out';
+  cctx.lineCap = cctx.lineJoin = 'round';
+  cctx.lineWidth = s.width; cctx.fillStyle = cctx.strokeStyle = '#000';
+  cctx.beginPath();
+  if (b) { cctx.moveTo(a.x, a.y); cctx.lineTo(b.x, b.y); cctx.stroke(); }
+  else { cctx.arc(a.x, a.y, s.width / 2, 0, Math.PI * 2); cctx.fill(); }
+  cctx.restore();
+}
+
 function redrawCommitted() {
   cctx.clearRect(0, 0, committed.width, committed.height);
   for (const s of strokes) drawStroke(cctx, s);
@@ -104,7 +117,7 @@ function scheduleLive() {
 committed.parentElement.addEventListener('pointerdown', e => {
   if (e.button > 0 && e.pointerType === 'mouse') return;
   const now = performance.now();
-  if (lastTap && now - lastTap.t < 350 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 40) {
+  if (lastTap && lastTap.n >= 2 && now - lastTap.t < 350 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 40) {
     lastTap = null;
     clearInk();
     return;
@@ -116,6 +129,7 @@ committed.parentElement.addEventListener('pointerdown', e => {
     pts: [{ x: e.clientX, y: e.clientY }], t0: now, len: 0,
   };
   active.set(e.pointerId, s);
+  if (s.erase) eraseSegment(s, s.pts[0]);
   e.currentTarget.setPointerCapture(e.pointerId);
   scheduleLive();
 });
@@ -129,9 +143,11 @@ committed.parentElement.addEventListener('pointermove', e => {
     const d = Math.hypot(ev.clientX - last.x, ev.clientY - last.y);
     if (d < 1) continue;
     s.len += d;
-    s.pts.push({ x: ev.clientX, y: ev.clientY });
+    const pt = { x: ev.clientX, y: ev.clientY };
+    s.pts.push(pt);
+    if (s.erase) eraseSegment(s, last, pt);
   }
-  scheduleLive();
+  if (!s.erase) scheduleLive();
 });
 
 function endStroke(e) {
@@ -139,9 +155,12 @@ function endStroke(e) {
   if (!s) return;
   active.delete(e.pointerId);
   const now = performance.now();
-  if (e.type === 'pointerup' && s.len < 10 && now - s.t0 < 250) lastTap = { t: now, x: e.clientX, y: e.clientY };
+  if (e.type === 'pointerup' && s.len < 10 && now - s.t0 < 250) {
+    const chained = lastTap && now - lastTap.t < 350 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 40;
+    lastTap = { t: now, x: e.clientX, y: e.clientY, n: chained ? lastTap.n + 1 : 1 };
+  } else lastTap = null;
   strokes.push(s);
-  drawStroke(cctx, s);
+  if (!s.erase) drawStroke(cctx, s);
   scheduleLive();
 }
 for (const t of ['pointerup', 'pointercancel']) committed.parentElement.addEventListener(t, endStroke);
@@ -187,17 +206,31 @@ function runAction(id) {
 }
 
 // ---------- UI ----------
+const ERASER_SVG = '<svg viewBox="0 0 24 24" width="SZ" height="SZ" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round">'
+  + '<path d="M16.2 3.8a2 2 0 0 1 2.8 0l1.2 1.2a2 2 0 0 1 0 2.8L10 18H5.5L3.8 16.3a2 2 0 0 1 0-2.8z"/>'
+  + '<path d="M8.5 7.5l8 8M10 18h10"/></svg>';
+function eraserIcon(size) {
+  const span = document.createElement('span');
+  span.className = 'eraserIcon';
+  span.innerHTML = ERASER_SVG.replaceAll('SZ', size);
+  return span;
+}
+
 function renderPens() {
   const box = $('pens');
   box.innerHTML = '';
   PENS.forEach((p, i) => {
     const b = document.createElement('button');
     b.className = i === penIndex ? 'active' : '';
-    const bar = document.createElement('i');
-    bar.style.background = p.color;
-    bar.style.opacity = p.alpha;
-    bar.style.height = Math.max(3, Math.min(p.width, 16)) + 'px';
-    if (p.glow) bar.style.boxShadow = `0 0 8px ${p.color}`;
+    let bar;
+    if (p.eraser) bar = eraserIcon(22);
+    else {
+      bar = document.createElement('i');
+      bar.style.background = p.color;
+      bar.style.opacity = p.alpha;
+      bar.style.height = Math.max(3, Math.min(p.width, 16)) + 'px';
+      if (p.glow) bar.style.boxShadow = `0 0 8px ${p.color}`;
+    }
     b.append(bar, document.createTextNode(p.name));
     b.onclick = () => setPen(i);
     box.append(b);
@@ -226,17 +259,23 @@ function renderQuickPens() {
     const b = document.createElement('button');
     b.className = i === penIndex ? 'active' : '';
     b.title = p.name;
-    const dot = document.createElement('i');
-    dot.style.background = p.color;
-    dot.style.opacity = Math.max(p.alpha, 0.6);
-    if (p.glow) dot.style.boxShadow = `0 0 8px ${p.color}`;
+    let dot;
+    if (p.eraser) dot = eraserIcon(20);
+    else {
+      dot = document.createElement('i');
+      dot.style.background = p.color;
+      dot.style.opacity = Math.max(p.alpha, 0.6);
+      if (p.glow) dot.style.boxShadow = `0 0 8px ${p.color}`;
+    }
     b.append(dot);
     b.onclick = () => { setPen(i); box.hidden = true; };
     box.append(b);
   });
   quickPick.value = PENS[CUSTOM].color;
   box.append(quickPick);
-  $('penBtn').style.color = PENS[penIndex].color;
+  const penBtn = $('penBtn');
+  if (PENS[penIndex].eraser) { penBtn.replaceChildren(eraserIcon(20)); penBtn.style.color = '#fff'; }
+  else { penBtn.textContent = '✎'; penBtn.style.color = PENS[penIndex].color; }
 }
 
 $('penBtn').onclick = () => { $('quickPens').hidden = !$('quickPens').hidden; };
