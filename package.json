@@ -1,13 +1,15 @@
 {
   "name": "screen-display",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Full-screen video overlay with drawing and MIDI control",
   "main": "main.js",
   "author": "Screen Display",
   "scripts": {
     "start": "electron .",
     "build:win": "electron-builder --win nsis --x64",
-    "release:win": "electron-builder --win nsis --x64 --publish always"
+    "release:win": "electron-builder --win nsis --x64 --publish always",
+    "build:mac": "electron-builder --mac dmg zip --universal",
+    "release:mac": "electron-builder --mac dmg zip --universal --publish always"
   },
   "build": {
     "appId": "com.screendisplay.app",
@@ -35,6 +37,18 @@
       "provider": "github",
       "owner": "iamanthonyterry",
       "repo": "screen-display"
+    },
+    "mac": {
+      "category": "public.app-category.video",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "ScreenDisplay-${version}-mac.${ext}",
+      "extendInfo": {
+        "NSCameraUsageDescription": "Screen Display uses video inputs such as cameras and capture devices.",
+        "NSMicrophoneUsageDescription": "Screen Display uses audio inputs for video sources."
+      }
     }
   },
   "devDependencies": {
