@@ -39,6 +39,7 @@ PENS[CUSTOM].color = store.get('customColor', PENS[CUSTOM].color);
 let notify = store.get('notify', true);
 let hidden = false;
 let strokes = [];
+let strokeSeq = 0;
 const active = new Map(); // pointerId -> stroke
 let lastTap = null;
 let midiMap = store.get('midiMap', null) || Object.fromEntries(ACTIONS.map(a => [a.id, a.note]));
@@ -56,6 +57,7 @@ function resize() {
     c.height = Math.round(innerHeight * dpr);
   }
   redrawCommitted();
+  rmtSend({ t: 'view', w: innerWidth, h: innerHeight });
 }
 addEventListener('resize', resize);
 
@@ -126,9 +128,10 @@ committed.parentElement.addEventListener('pointerdown', e => {
   const pen = PENS[penIndex];
   const s = {
     color: pen.color, width: pen.width * sizeMul, alpha: pen.alpha, cap: pen.cap, glow: pen.glow || 0, erase: !!pen.eraser,
-    pts: [{ x: e.clientX, y: e.clientY }], t0: now, len: 0,
+    pts: [{ x: e.clientX, y: e.clientY }], t0: now, len: 0, id: 'h' + (++strokeSeq),
   };
   active.set(e.pointerId, s);
+  rmtSend({ t: 'ss', ...rmtStrokeHead(s), p: rmtFlat(s.pts) });
   if (s.erase) eraseSegment(s, s.pts[0]);
   e.currentTarget.setPointerCapture(e.pointerId);
   scheduleLive();
@@ -138,6 +141,7 @@ committed.parentElement.addEventListener('pointermove', e => {
   const s = active.get(e.pointerId);
   if (!s) return;
   const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  const from = s.pts.length;
   for (const ev of (events.length ? events : [e])) {
     const last = s.pts[s.pts.length - 1];
     const d = Math.hypot(ev.clientX - last.x, ev.clientY - last.y);
@@ -147,6 +151,7 @@ committed.parentElement.addEventListener('pointermove', e => {
     s.pts.push(pt);
     if (s.erase) eraseSegment(s, last, pt);
   }
+  if (s.pts.length > from) rmtSend({ t: 'sp', id: s.id, p: rmtFlat(s.pts.slice(from)) });
   if (!s.erase) scheduleLive();
 });
 
@@ -162,6 +167,7 @@ function endStroke(e) {
   strokes.push(s);
   if (!s.erase) drawStroke(cctx, s);
   scheduleLive();
+  rmtSend({ t: 'se', id: s.id });
 }
 for (const t of ['pointerup', 'pointercancel']) committed.parentElement.addEventListener(t, endStroke);
 committed.parentElement.addEventListener('contextmenu', e => e.preventDefault());
@@ -172,16 +178,19 @@ function clearInk() {
   active.clear();
   cctx.clearRect(0, 0, committed.width, committed.height);
   lctx.clearRect(0, 0, live.width, live.height);
+  rmtSend({ t: 'clear' });
   toast('Cleared');
 }
 function undo() {
-  strokes.pop();
+  const s = strokes.pop();
   redrawCommitted();
+  if (s) rmtSend({ t: 'undo', id: s.id });
   toast('Undo');
 }
 function setHidden(h) {
   hidden = h;
   $('ink').classList.toggle('hidden', h);
+  rmtSend({ t: 'hidden', v: h });
   toast(h ? 'Drawing hidden' : 'Drawing shown');
 }
 function setPen(i) {
@@ -341,6 +350,238 @@ addEventListener('pointermove', wake);
 addEventListener('pointerdown', wake);
 wake();
 
+// ---------- remote (stream to / draw from a browser on the LAN) ----------
+// The viewer gets the camera over WebRTC and the ink as normalized vector strokes over a
+// WebSocket, so remote pen input is drawn here as soon as it arrives.
+const rmt = {
+  on: store.get('remoteOn', false), port: store.get('remotePort', 8787), pin: store.get('remotePin', null),
+  ws: null, token: null, retry: null, viewers: new Set(), peers: new Map(),
+};
+const newPin = () => String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, '0');
+if (!/^\d{4,8}$/.test(rmt.pin)) { rmt.pin = newPin(); store.set('remotePin', rmt.pin); }
+
+const r4 = v => Math.round(v * 1e4) / 1e4;
+const rmtFlat = pts => pts.flatMap(p => [r4(p.x / innerWidth), r4(p.y / innerHeight)]);
+const rmtBg = () => ({ mode: bgMode, color: $('bgColor').value, fit: $('fitSelect').value });
+const rmtStrokeHead = s => ({ id: s.id, c: s.color, w: r4(s.width / innerWidth), a: s.alpha, cap: s.cap, g: r4(s.glow / innerWidth), e: s.erase ? 1 : 0 });
+
+function rmtSend(m) {
+  if (rmt.ws && rmt.ws.readyState === 1 && (rmt.viewers.size || m.to)) rmt.ws.send(JSON.stringify(m));
+}
+
+function rmtState() {
+  const enc = (s, open) => ({ ...rmtStrokeHead(s), p: rmtFlat(s.pts), open });
+  return {
+    t: 'state', view: { w: innerWidth, h: innerHeight }, bg: rmtBg(), hidden,
+    strokes: [...strokes.map(s => enc(s, 0)), ...[...active.values()].map(s => enc(s, 1))],
+  };
+}
+
+function rmtStatus() {
+  const n = rmt.viewers.size;
+  $('remoteStatus').textContent = !rmt.on ? '' : rmt.ws ? `(${n} viewer${n === 1 ? '' : 's'})` : '(starting…)';
+}
+
+// --- remote input (untrusted: validate everything) ---
+const HEX = /^#[0-9a-f]{6}$/i;
+const inRange = (v, lo, hi) => typeof v === 'number' && v >= lo && v <= hi;
+const MAX_REMOTE_PTS = 20000;
+
+function rmtPoints(s, flat) {
+  const out = [];
+  if (!Array.isArray(flat) || flat.length % 2) return out;
+  for (let i = 0; i < flat.length; i += 2) {
+    if (!inRange(flat[i], -0.5, 1.5) || !inRange(flat[i + 1], -0.5, 1.5)) continue;
+    if (s.pts.length >= MAX_REMOTE_PTS) break;
+    const pt = { x: flat[i] * innerWidth, y: flat[i + 1] * innerHeight };
+    const last = s.pts[s.pts.length - 1];
+    if (last) {
+      if (Math.hypot(pt.x - last.x, pt.y - last.y) < 1) continue;
+      s.len += Math.hypot(pt.x - last.x, pt.y - last.y);
+      if (s.erase) eraseSegment(s, last, pt);
+    }
+    s.pts.push(pt);
+    out.push(flat[i], flat[i + 1]);
+  }
+  return out;
+}
+
+function rmtFinish(id) {
+  const s = active.get(id);
+  if (!s) return;
+  active.delete(id);
+  strokes.push(s);
+  if (!s.erase) drawStroke(cctx, s);
+  scheduleLive();
+  rmtSend({ t: 'se', id, except: id.split('.')[0] });
+}
+
+function rmtOnMessage(m) {
+  if (!m || typeof m !== 'object') return;
+  const from = m.from;
+  switch (m.t) {
+    case 'join':
+      rmt.viewers.add(m.id);
+      rmtSend({ to: m.id, ...rmtState() });
+      rmtStatus();
+      break;
+    case 'leave':
+      rmt.viewers.delete(m.id);
+      rmtClosePeer(m.id);
+      for (const id of [...active.keys()]) if (typeof id === 'string' && id.startsWith(m.id + '.')) rmtFinish(id);
+      rmtStatus();
+      break;
+    case 'ss': {
+      if (typeof m.id !== 'string' || m.id.length > 40 || !m.id.startsWith(from + '.') || active.has(m.id)) return;
+      if (!HEX.test(m.c) || !inRange(m.w, 0, 0.25) || !inRange(m.a, 0, 1) || !inRange(m.g || 0, 0, 0.1)) return;
+      if (m.cap !== 'round' && m.cap !== 'butt') return;
+      if (hidden) setHidden(false);
+      const s = { id: m.id, color: m.c, width: m.w * innerWidth, alpha: m.a, cap: m.cap, glow: (m.g || 0) * innerWidth, erase: !!m.e, pts: [], t0: 0, len: 0 };
+      const p = rmtPoints(s, m.p);
+      if (!s.pts.length) return;
+      active.set(s.id, s);
+      if (s.erase) eraseSegment(s, s.pts[0]);
+      scheduleLive();
+      rmtSend({ t: 'ss', id: s.id, c: s.color, w: m.w, a: s.alpha, cap: s.cap, g: m.g || 0, e: m.e ? 1 : 0, p, except: from });
+      break;
+    }
+    case 'sp': {
+      const s = typeof m.id === 'string' && m.id.startsWith(from + '.') ? active.get(m.id) : null;
+      if (!s) return;
+      const p = rmtPoints(s, m.p);
+      if (!p.length) return;
+      if (!s.erase) scheduleLive();
+      rmtSend({ t: 'sp', id: s.id, p, except: from });
+      break;
+    }
+    case 'se':
+      if (typeof m.id === 'string' && m.id.startsWith(from + '.')) rmtFinish(m.id);
+      break;
+    case 'cmd':
+      if (m.c === 'clear') clearInk();
+      else if (m.c === 'undo') undo();
+      else if (m.c === 'hide') setHidden(true);
+      else if (m.c === 'show') setHidden(false);
+      break;
+    case 'rtc': rmtOffer(from, m.sdp); break;
+    case 'ice': rmtIce(from, m.c); break;
+  }
+}
+
+// --- video (WebRTC, host candidates only: LAN) ---
+function rmtClosePeer(id) {
+  const p = rmt.peers.get(id);
+  if (!p) return;
+  rmt.peers.delete(id);
+  p.pc.close();
+}
+
+function rmtOffer(id, sdp) {
+  if (!rmt.viewers.has(id) || !sdp || typeof sdp.sdp !== 'string') return;
+  rmtClosePeer(id);
+  const pc = new RTCPeerConnection({ iceServers: [] });
+  const peer = { pc, q: Promise.resolve(), answered: false, early: [] };
+  rmt.peers.set(id, peer);
+  pc.onicecandidate = e => {
+    if (!e.candidate) return;
+    if (peer.answered) rmtSend({ t: 'ice', to: id, c: e.candidate });
+    else peer.early.push(e.candidate);
+  };
+  peer.q = peer.q.then(async () => {
+    await pc.setRemoteDescription({ type: 'offer', sdp: sdp.sdp });
+    const tr = pc.getTransceivers().find(t => t.receiver.track.kind === 'video');
+    if (!tr) return;
+    tr.direction = 'sendonly';
+    const track = stream && stream.getVideoTracks()[0];
+    if (track) { try { track.contentHint = 'motion'; } catch {} await tr.sender.replaceTrack(track); }
+    await pc.setLocalDescription(await pc.createAnswer());
+    rmtSend({ t: 'rtc', to: id, sdp: { type: 'answer', sdp: pc.localDescription.sdp } });
+    peer.answered = true;
+    for (const c of peer.early) rmtSend({ t: 'ice', to: id, c });
+    peer.early = [];
+    try {
+      const p = tr.sender.getParameters();
+      if (!p.encodings || !p.encodings.length) p.encodings = [{}];
+      p.encodings[0].maxBitrate = 10e6;
+      p.degradationPreference = 'maintain-framerate';
+      await tr.sender.setParameters(p);
+    } catch {}
+  }).catch(() => {});
+}
+
+function rmtIce(id, c) {
+  const peer = rmt.peers.get(id);
+  if (!peer || !c || typeof c.candidate !== 'string') return;
+  peer.q = peer.q.then(() => peer.pc.addIceCandidate(c)).catch(() => {});
+}
+
+function rmtSyncTracks() {
+  const track = (stream && stream.getVideoTracks()[0]) || null;
+  for (const [id, { pc }] of rmt.peers) {
+    const tr = pc.getTransceivers().find(t => t.receiver.track.kind === 'video');
+    if (!tr || tr.direction !== 'sendonly') continue;
+    // a track that wasn't in the original answer isn't signalled, so the viewer must renegotiate
+    if (track && !tr.sender.track) rmtSend({ t: 'renego', to: id });
+    else tr.sender.replaceTrack(track).catch(() => {});
+  }
+}
+
+// --- connection to the local hub ---
+function rmtReset() {
+  for (const id of [...rmt.peers.keys()]) rmtClosePeer(id);
+  for (const id of [...active.keys()]) if (typeof id === 'string') active.delete(id);
+  rmt.viewers.clear();
+  rmtStatus();
+}
+
+function rmtConnect() {
+  const ws = new WebSocket(`ws://127.0.0.1:${rmt.port}/?role=host&token=${rmt.token}`);
+  rmt.ws = ws;
+  ws.onopen = rmtStatus;
+  ws.onmessage = e => { try { rmtOnMessage(JSON.parse(e.data)); } catch {} };
+  ws.onclose = () => {
+    if (rmt.ws !== ws) return;
+    rmt.ws = null;
+    rmtReset();
+    if (rmt.on) rmt.retry = setTimeout(rmtConnect, 1000);
+  };
+}
+
+async function rmtApply() {
+  clearTimeout(rmt.retry);
+  const old = rmt.ws;
+  rmt.ws = null;
+  if (old) old.close();
+  rmtReset();
+  $('remoteInfo').hidden = !rmt.on;
+  $('remoteToggle').checked = rmt.on;
+  $('remotePort').value = rmt.port;
+  $('remotePin').value = rmt.pin;
+  if (!window.remote) { $('remoteSection').hidden = true; return; }
+  if (!rmt.on) { await window.remote.stop(); $('remoteUrls').replaceChildren(); return; }
+  const r = await window.remote.start({ port: rmt.port, pin: rmt.pin });
+  if (!rmt.on) return;
+  if (!r.ok) { $('remoteStatus').textContent = '(' + r.error + ')'; $('remoteUrls').replaceChildren(); return; }
+  $('remoteUrls').replaceChildren(...r.urls.map(u => { const c = document.createElement('code'); c.textContent = u; return c; }));
+  rmt.token = r.token;
+  rmtConnect();
+}
+
+function setRemote(patch) {
+  Object.assign(rmt, patch);
+  store.set('remoteOn', rmt.on); store.set('remotePort', rmt.port); store.set('remotePin', rmt.pin);
+  rmtApply();
+}
+$('remoteToggle').onchange = e => setRemote({ on: e.target.checked });
+$('remotePort').onchange = e => {
+  const p = +e.target.value;
+  if (Number.isInteger(p) && p >= 1024 && p <= 65535) setRemote({ port: p }); else e.target.value = rmt.port;
+};
+$('remotePin').onchange = e => {
+  if (/^\d{4,8}$/.test(e.target.value)) setRemote({ pin: e.target.value }); else e.target.value = rmt.pin;
+};
+$('remotePinNew').onclick = () => setRemote({ pin: newPin() });
+
 // ---------- video ----------
 const video = $('video');
 let stream = null;
@@ -349,6 +590,7 @@ async function startCamera(deviceId) {
   if (stream) stream.getTracks().forEach(t => t.stop());
   stream = null;
   video.srcObject = null;
+  rmtSyncTracks();
   $('noVideo').classList.toggle('off', bgMode !== 'camera');
   if (!deviceId || bgMode !== 'camera') return;
   try {
@@ -357,6 +599,7 @@ async function startCamera(deviceId) {
       audio: false,
     });
     video.srcObject = stream;
+    rmtSyncTracks();
     $('noVideo').classList.add('off');
     store.set('cam', deviceId);
   } catch (err) {
@@ -398,6 +641,7 @@ function applyBackground() {
   const blank = bgMode === 'blank';
   document.body.style.background = blank ? $('bgColor').value : '#000';
   video.style.display = blank ? 'none' : '';
+  rmtSend({ t: 'bg', ...rmtBg() });
   $('colorRow').style.display = blank ? '' : 'none';
   $('camRow').style.display = $('fitRow').style.display = blank ? 'none' : '';
   if (blank) startCamera(null); // releases the camera
@@ -407,7 +651,7 @@ $('bgMode').onchange = applyBackground;
 $('bgColor').oninput = applyBackground;
 
 $('fitSelect').value = store.get('fit', 'contain');
-function applyFit() { video.style.objectFit = $('fitSelect').value; store.set('fit', $('fitSelect').value); }
+function applyFit() { video.style.objectFit = $('fitSelect').value; store.set('fit', $('fitSelect').value); rmtSend({ t: 'bg', ...rmtBg() }); }
 $('fitSelect').onchange = applyFit;
 
 $('notifyToggle').checked = notify;
@@ -476,6 +720,7 @@ if (navigator.requestMIDIAccess) {
 
 // ---------- init ----------
 applyBackground();
+rmtApply();
 renderPens();
 renderMap();
 resize();

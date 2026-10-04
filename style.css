@@ -65,3 +65,8 @@ body.idle #penBtn { opacity: 0; }
 .eraserIcon { display: flex; color: #fff; }
 .eraserIcon svg { display: block; }
 #penBtn { display: flex; align-items: center; justify-content: center; padding: 0; }
+
+#panel input[type=text], #panel input[type=number] { background: #333; color: #eee; border: 0; border-radius: 6px; padding: 6px; width: 90px; text-align: right; }
+.pinBox { display: flex; gap: 6px; }
+#remoteStatus { font-weight: normal; text-transform: none; letter-spacing: 0; }
+#remoteUrls code { display: block; color: #9cf; margin: 2px 0; user-select: text; -webkit-user-select: text; }

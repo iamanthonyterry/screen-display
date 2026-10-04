@@ -1,6 +1,6 @@
 {
   "name": "screen-display",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Full-screen video overlay with drawing and MIDI control",
   "main": "main.js",
   "author": "Screen Display",
@@ -17,6 +17,8 @@
     "files": [
       "main.js",
       "preload.js",
+      "remote-server.js",
+      "remote.html",
       "index.html",
       "app.js",
       "style.css"
@@ -56,6 +58,7 @@
     "electron-builder": "^25.1.8"
   },
   "dependencies": {
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.9",
+    "ws": "^8.22.0"
   }
 }

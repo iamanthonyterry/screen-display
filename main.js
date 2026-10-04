@@ -1,6 +1,7 @@
 const { app, BrowserWindow, session, ipcMain } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
+const remote = require('./remote-server');
 
 const ALLOWED = new Set(['media', 'midi', 'midiSysex', 'fullscreen']);
 
@@ -48,6 +49,9 @@ function setupUpdater() {
   }
 }
 
+ipcMain.handle('remote:start', (_e, opts) => remote.start(opts || {}));
+ipcMain.handle('remote:stop', () => remote.stop());
+
 app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(ALLOWED.has(perm)));
   session.defaultSession.setPermissionCheckHandler((_wc, perm) => ALLOWED.has(perm));
@@ -55,4 +59,5 @@ app.whenReady().then(() => {
   createWindow();
 });
 
+app.on('before-quit', () => { remote.stop(); });
 app.on('window-all-closed', () => app.quit());

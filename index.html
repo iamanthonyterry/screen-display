@@ -54,6 +54,17 @@
       <label>Size <input id="size" type="range" min="0.5" max="3" step="0.1" value="1"></label>
     </section>
 
+    <section id="remoteSection">
+      <h3>Remote <span id="remoteStatus"></span></h3>
+      <label>Allow remote view &amp; draw <input id="remoteToggle" type="checkbox"></label>
+      <div id="remoteInfo" hidden>
+        <label>Port <input id="remotePort" type="number" min="1024" max="65535"></label>
+        <label>PIN <span class="pinBox"><input id="remotePin" type="text" inputmode="numeric" maxlength="8"><button id="remotePinNew">New</button></span></label>
+        <div id="remoteUrls"></div>
+        <small>On the same Wi‑Fi, open an address above in a browser and enter the PIN.</small>
+      </div>
+    </section>
+
     <section>
       <h3>Updates</h3>
       <div class="row">
