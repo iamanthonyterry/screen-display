@@ -374,7 +374,7 @@ if (!/^\d{4,8}$/.test(rmt.pin)) { rmt.pin = newPin(); store.set('remotePin', rmt
 
 const r4 = v => Math.round(v * 1e4) / 1e4;
 const rmtFlat = pts => pts.flatMap(p => [r4(p.x / areaW), r4(p.y / areaH)]);
-const rmtBg = () => ({ mode: bgMode, color: $('bgColor').value, fit: $('fitSelect').value });
+const rmtBg = () => ({ mode: bgMode, color: $('bgColor').value, fit: $('fitSelect').value, crop: $('cropSelect').value });
 const rmtStrokeHead = s => ({ id: s.id, c: s.color, w: r4(s.width / areaW), a: s.alpha, cap: s.cap, g: r4(s.glow / areaW), e: s.erase ? 1 : 0 });
 
 function rmtSend(m) {
@@ -656,6 +656,7 @@ function applyBackground() {
   rmtSend({ t: 'bg', ...rmtBg() });
   $('colorRow').style.display = blank ? '' : 'none';
   $('camRow').style.display = $('fitRow').style.display = blank ? 'none' : '';
+  $('cropRow').style.display = !blank && $('fitSelect').value === 'crop' ? '' : 'none';
   if (blank) startCamera(null); // releases the camera
   else startCamera($('camSelect').value);
 }
@@ -663,7 +664,17 @@ $('bgMode').onchange = applyBackground;
 $('bgColor').oninput = applyBackground;
 
 $('fitSelect').value = store.get('fit', 'contain');
-function applyFit() { video.style.objectFit = $('fitSelect').value; store.set('fit', $('fitSelect').value); rmtSend({ t: 'bg', ...rmtBg() }); }
+$('cropSelect').value = store.get('crop', 'left');
+const CROP_POS = { left: 'left center', right: 'right center', top: 'center top', bottom: 'center bottom', center: 'center center' };
+function applyFit() {
+  const fit = $('fitSelect').value, crop = fit === 'crop';
+  video.style.objectFit = crop ? 'cover' : fit;
+  video.style.objectPosition = crop ? CROP_POS[$('cropSelect').value] : '';
+  $('cropRow').style.display = crop && bgMode !== 'blank' ? '' : 'none';
+  store.set('fit', fit); store.set('crop', $('cropSelect').value);
+  rmtSend({ t: 'bg', ...rmtBg() });
+}
+$('cropSelect').onchange = applyFit;
 $('fitSelect').onchange = applyFit;
 
 $('areaWidth').value = String(areaFrac);

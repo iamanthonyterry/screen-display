@@ -61,8 +61,18 @@
       <label id="fitRow">Fit
         <select id="fitSelect">
           <option value="contain">Fit (letterbox)</option>
-          <option value="cover">Fill (crop)</option>
+          <option value="cover">Fill (crop centered)</option>
+          <option value="crop">Crop (choose side)</option>
           <option value="fill">Stretch</option>
+        </select>
+      </label>
+      <label id="cropRow">Keep
+        <select id="cropSelect">
+          <option value="left">Left (cut right)</option>
+          <option value="right">Right (cut left)</option>
+          <option value="top">Top (cut bottom)</option>
+          <option value="bottom">Bottom (cut top)</option>
+          <option value="center">Center</option>
         </select>
       </label>
       <button id="fsBtn">Toggle fullscreen (F)</button>

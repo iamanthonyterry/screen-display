@@ -187,7 +187,9 @@ function applyBg() {
   const blank = bg.mode === 'blank';
   stage.style.background = blank ? bg.color : '#000';
   video.style.display = blank ? 'none' : '';
-  video.style.objectFit = bg.fit;
+  const crop = bg.fit === 'crop';
+  video.style.objectFit = crop ? 'cover' : bg.fit;
+  video.style.objectPosition = crop ? ({ left: 'left center', right: 'right center', top: 'center top', bottom: 'center bottom' }[bg.crop] || 'center') : '';
 }
 function setHidden(h) { hidden = h; $('ink').classList.toggle('hidden', h); }
 
@@ -343,7 +345,7 @@ function onMessage(m) {
     case 'state': onState(m); startRtcOnce(); break;
     case 'renego': startRtc(); break;
     case 'view': view = { w: m.w, h: m.h }; layout(); break;
-    case 'bg': bg = { mode: m.mode, color: m.color, fit: m.fit }; applyBg(); break;
+    case 'bg': bg = { mode: m.mode, color: m.color, fit: m.fit, crop: m.crop }; applyBg(); break;
     case 'hidden': setHidden(m.v); break;
     case 'ss': strokeStart(m); break;
     case 'sp': strokePoints(m); break;
