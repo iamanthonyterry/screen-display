@@ -3,6 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Screen Display">
 <title>Screen Display Remote</title>
 <style>
 * { box-sizing: border-box; }
@@ -17,6 +21,7 @@ body { touch-action: none; user-select: none; -webkit-user-select: none; }
 #loginErr { color: #ff6b61; min-height: 1.4em; }
 
 #stage { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); background: #000; overflow: hidden; }
+#stage::after { content: ''; position: absolute; inset: 0; border: 2px solid rgba(255,255,255,.7); outline: 1px solid rgba(0,0,0,.6); outline-offset: -2px; pointer-events: none; z-index: 5; }
 #video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
 #ink { position: absolute; inset: 0; transition: opacity .25s; }
 #ink.hidden { opacity: 0; }
@@ -194,8 +199,12 @@ function pt(e) {
 }
 
 const pointers = new Map(); // pointerId -> stroke id
+let penOnly = store.get('penOnly', false), penDown = 0;
 stage.addEventListener('pointerdown', e => {
   if (e.button > 0 && e.pointerType === 'mouse') return;
+  if (e.pointerType === 'pen' && !penOnly) { penOnly = true; store.set('penOnly', true); syncPenBtn(); } // first Pencil touch turns on palm rejection
+  if (e.pointerType === 'touch' && (penOnly || penDown)) return;
+  if (e.pointerType === 'pen') penDown++;
   const pen = PENS[penIndex];
   const m = {
     t: 'ss', id: myId + '.' + (++strokeSeq), c: pen.color, w: Math.round(pen.width * sizeMul / view.w * 1e4) / 1e4, a: pen.alpha,
@@ -221,6 +230,7 @@ function up(e) {
   const id = pointers.get(e.pointerId);
   if (!id) return;
   pointers.delete(e.pointerId);
+  if (e.pointerType === 'pen') penDown = Math.max(0, penDown - 1);
   strokeEnd(id);
   send({ t: 'se', id });
 }
@@ -247,6 +257,9 @@ function setPen(i) {
   if (dot) dot.style.background = PENS[CUSTOM].color;
 }
 
+let penBtn = null;
+function syncPenBtn() { if (penBtn) { penBtn.classList.toggle('active', penOnly); penBtn.title = penOnly ? 'Pencil only (palm rejection on) — tap to allow finger' : 'Allow finger and Pencil — tap for Pencil only'; } }
+
 function buildBar() {
   bar.replaceChildren();
   PENS.forEach((p, i) => {
@@ -263,9 +276,10 @@ function buildBar() {
     cmdBtn('↶', 'Undo', () => send({ t: 'cmd', c: 'undo' })),
     cmdBtn('🗑', 'Clear', () => send({ t: 'cmd', c: 'clear' })),
     cmdBtn('👁', 'Hide / show drawing', () => send({ t: 'cmd', c: hidden ? 'show' : 'hide' })),
+    (penBtn = cmdBtn('✋', '', () => { penOnly = !penOnly; store.set('penOnly', penOnly); syncPenBtn(); })),
     cmdBtn('⛶', 'Fullscreen', () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(() => {}); }),
     cmdBtn('✕', 'Hide toolbar', () => showBar(false)));
-  setPen(penIndex);
+  setPen(penIndex); syncPenBtn();
 }
 function showBar(v) { bar.hidden = !v; $('toggleBar').hidden = v; }
 $('toggleBar').onclick = () => showBar(true);

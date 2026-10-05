@@ -7,15 +7,18 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <video id="video" autoplay muted playsinline></video>
+  <div id="area">
+    <video id="video" autoplay muted playsinline></video>
 
-  <div id="ink">
-    <canvas id="committed"></canvas>
-    <canvas id="live"></canvas>
+    <div id="ink">
+      <canvas id="committed"></canvas>
+      <canvas id="live"></canvas>
+    </div>
+
+    <div id="noVideo">No video source<br><small>Open settings and choose your NDI Virtual Input camera</small></div>
   </div>
 
   <div id="toast"></div>
-  <div id="noVideo">No video source<br><small>Open settings and choose your NDI Virtual Input camera</small></div>
 
   <div id="quickPens" hidden></div>
   <button id="penBtn" title="Pens (P)">✎</button>
@@ -26,6 +29,24 @@
       <strong>Screen Display</strong>
       <button id="closePanel">✕</button>
     </header>
+
+    <section>
+      <h3>Screen size</h3>
+      <label>Width
+        <select id="areaWidth">
+          <option value="1">Full screen</option>
+          <option value="0.5">1/2 width</option>
+          <option value="0.3333333">1/3 width</option>
+        </select>
+      </label>
+      <label id="areaSideRow">Position
+        <select id="areaSide">
+          <option value="right">Right</option>
+          <option value="center">Center</option>
+          <option value="left">Left</option>
+        </select>
+      </label>
+    </section>
 
     <section>
       <h3>Video</h3>

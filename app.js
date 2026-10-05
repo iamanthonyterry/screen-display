@@ -50,14 +50,26 @@ const committed = $('committed'), live = $('live');
 const cctx = committed.getContext('2d'), lctx = live.getContext('2d');
 let dpr = 1;
 
+// the drawable area: the whole window, or a 1/2 or 1/3 width strip on one side
+const area = $('area');
+let areaFrac = store.get('areaWidth', 1), areaSide = store.get('areaSide', 'left');
+let areaW = innerWidth, areaH = innerHeight, areaX = 0;
+
+function layoutArea() {
+  areaW = Math.round(innerWidth * areaFrac); areaH = innerHeight;
+  areaX = areaFrac >= 1 ? 0 : areaSide === 'left' ? 0 : areaSide === 'right' ? innerWidth - areaW : Math.round((innerWidth - areaW) / 2);
+  area.style.left = areaX + 'px'; area.style.width = areaW + 'px';
+}
+
 function resize() {
+  layoutArea();
   dpr = window.devicePixelRatio || 1;
   for (const c of [committed, live]) {
-    c.width = Math.round(innerWidth * dpr);
-    c.height = Math.round(innerHeight * dpr);
+    c.width = Math.round(areaW * dpr);
+    c.height = Math.round(areaH * dpr);
   }
   redrawCommitted();
-  rmtSend({ t: 'view', w: innerWidth, h: innerHeight });
+  rmtSend({ t: 'view', w: areaW, h: areaH });
 }
 addEventListener('resize', resize);
 
@@ -128,7 +140,7 @@ committed.parentElement.addEventListener('pointerdown', e => {
   const pen = PENS[penIndex];
   const s = {
     color: pen.color, width: pen.width * sizeMul, alpha: pen.alpha, cap: pen.cap, glow: pen.glow || 0, erase: !!pen.eraser,
-    pts: [{ x: e.clientX, y: e.clientY }], t0: now, len: 0, id: 'h' + (++strokeSeq),
+    pts: [{ x: e.clientX - areaX, y: e.clientY }], t0: now, len: 0, id: 'h' + (++strokeSeq),
   };
   active.set(e.pointerId, s);
   rmtSend({ t: 'ss', ...rmtStrokeHead(s), p: rmtFlat(s.pts) });
@@ -147,7 +159,7 @@ committed.parentElement.addEventListener('pointermove', e => {
     const d = Math.hypot(ev.clientX - last.x, ev.clientY - last.y);
     if (d < 1) continue;
     s.len += d;
-    const pt = { x: ev.clientX, y: ev.clientY };
+    const pt = { x: ev.clientX - areaX, y: ev.clientY };
     s.pts.push(pt);
     if (s.erase) eraseSegment(s, last, pt);
   }
@@ -361,9 +373,9 @@ const newPin = () => String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000
 if (!/^\d{4,8}$/.test(rmt.pin)) { rmt.pin = newPin(); store.set('remotePin', rmt.pin); }
 
 const r4 = v => Math.round(v * 1e4) / 1e4;
-const rmtFlat = pts => pts.flatMap(p => [r4(p.x / innerWidth), r4(p.y / innerHeight)]);
+const rmtFlat = pts => pts.flatMap(p => [r4(p.x / areaW), r4(p.y / areaH)]);
 const rmtBg = () => ({ mode: bgMode, color: $('bgColor').value, fit: $('fitSelect').value });
-const rmtStrokeHead = s => ({ id: s.id, c: s.color, w: r4(s.width / innerWidth), a: s.alpha, cap: s.cap, g: r4(s.glow / innerWidth), e: s.erase ? 1 : 0 });
+const rmtStrokeHead = s => ({ id: s.id, c: s.color, w: r4(s.width / areaW), a: s.alpha, cap: s.cap, g: r4(s.glow / areaW), e: s.erase ? 1 : 0 });
 
 function rmtSend(m) {
   if (rmt.ws && rmt.ws.readyState === 1 && (rmt.viewers.size || m.to)) rmt.ws.send(JSON.stringify(m));
@@ -372,7 +384,7 @@ function rmtSend(m) {
 function rmtState() {
   const enc = (s, open) => ({ ...rmtStrokeHead(s), p: rmtFlat(s.pts), open });
   return {
-    t: 'state', view: { w: innerWidth, h: innerHeight }, bg: rmtBg(), hidden,
+    t: 'state', view: { w: areaW, h: areaH }, bg: rmtBg(), hidden,
     strokes: [...strokes.map(s => enc(s, 0)), ...[...active.values()].map(s => enc(s, 1))],
   };
 }
@@ -393,7 +405,7 @@ function rmtPoints(s, flat) {
   for (let i = 0; i < flat.length; i += 2) {
     if (!inRange(flat[i], -0.5, 1.5) || !inRange(flat[i + 1], -0.5, 1.5)) continue;
     if (s.pts.length >= MAX_REMOTE_PTS) break;
-    const pt = { x: flat[i] * innerWidth, y: flat[i + 1] * innerHeight };
+    const pt = { x: flat[i] * areaW, y: flat[i + 1] * areaH };
     const last = s.pts[s.pts.length - 1];
     if (last) {
       if (Math.hypot(pt.x - last.x, pt.y - last.y) < 1) continue;
@@ -436,7 +448,7 @@ function rmtOnMessage(m) {
       if (!HEX.test(m.c) || !inRange(m.w, 0, 0.25) || !inRange(m.a, 0, 1) || !inRange(m.g || 0, 0, 0.1)) return;
       if (m.cap !== 'round' && m.cap !== 'butt') return;
       if (hidden) setHidden(false);
-      const s = { id: m.id, color: m.c, width: m.w * innerWidth, alpha: m.a, cap: m.cap, glow: (m.g || 0) * innerWidth, erase: !!m.e, pts: [], t0: 0, len: 0 };
+      const s = { id: m.id, color: m.c, width: m.w * areaW, alpha: m.a, cap: m.cap, glow: (m.g || 0) * areaW, erase: !!m.e, pts: [], t0: 0, len: 0 };
       const p = rmtPoints(s, m.p);
       if (!s.pts.length) return;
       active.set(s.id, s);
@@ -639,7 +651,7 @@ function applyBackground() {
   store.set('bgMode', bgMode);
   store.set('bgColor', $('bgColor').value);
   const blank = bgMode === 'blank';
-  document.body.style.background = blank ? $('bgColor').value : '#000';
+  area.style.background = blank ? $('bgColor').value : '#000';
   video.style.display = blank ? 'none' : '';
   rmtSend({ t: 'bg', ...rmtBg() });
   $('colorRow').style.display = blank ? '' : 'none';
@@ -653,6 +665,17 @@ $('bgColor').oninput = applyBackground;
 $('fitSelect').value = store.get('fit', 'contain');
 function applyFit() { video.style.objectFit = $('fitSelect').value; store.set('fit', $('fitSelect').value); rmtSend({ t: 'bg', ...rmtBg() }); }
 $('fitSelect').onchange = applyFit;
+
+$('areaWidth').value = String(areaFrac);
+$('areaSide').value = areaSide;
+function applyArea() {
+  areaFrac = +$('areaWidth').value; areaSide = $('areaSide').value;
+  store.set('areaWidth', areaFrac); store.set('areaSide', areaSide);
+  $('areaSideRow').style.display = areaFrac >= 1 ? 'none' : '';
+  resize();
+}
+$('areaWidth').onchange = $('areaSide').onchange = applyArea;
+$('areaSideRow').style.display = areaFrac >= 1 ? 'none' : '';
 
 $('notifyToggle').checked = notify;
 $('notifyToggle').onchange = () => {

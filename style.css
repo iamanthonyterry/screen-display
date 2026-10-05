@@ -3,13 +3,14 @@ html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 
 body { touch-action: none; user-select: none; -webkit-user-select: none; }
 body.idle { cursor: none; }
 
-#video { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+#area { position: fixed; top: 0; bottom: 0; left: 0; width: 100%; overflow: hidden; }
+#video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
 
-#ink { position: fixed; inset: 0; transition: opacity .25s; }
+#ink { position: absolute; inset: 0; transition: opacity .25s; }
 #ink.hidden { opacity: 0; }
 #ink canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
 
-#noVideo { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+#noVideo { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center; color: #666; font-size: 28px; pointer-events: none; }
 #noVideo small { font-size: 14px; margin-top: 8px; }
 #noVideo.off { display: none; }
